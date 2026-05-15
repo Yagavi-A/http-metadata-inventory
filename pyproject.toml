@@ -1,0 +1,65 @@
+[project]
+name = "http-metadata-inventory"
+version = "0.1.0"
+description = "FastAPI service that collects and stores HTTP metadata (headers, cookies, page source) for given URLs."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.6",
+    "motor==3.5.1",
+    "pymongo==4.8.0",
+    "httpx==0.27.2",
+    "pydantic==2.9.2",
+    "pydantic-settings==2.5.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "respx==0.21.1",
+    "mongomock-motor==0.0.34",
+    "anyio==4.6.0",
+    "ruff==0.6.9",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import ordering)
+    "B",   # flake8-bugbear (common pitfalls)
+    "UP",  # pyupgrade (modern syntax)
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",   # line too long - the formatter handles long lines
+    "B008",   # FastAPI `Depends(...)` lives in defaults by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]  # tests use bare `assert`
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
