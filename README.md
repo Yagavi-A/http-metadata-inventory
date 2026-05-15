@@ -120,6 +120,8 @@ curl -s "http://localhost:8000/v1/metadata?url=https://example.org" | jq .
 
 ## Local development
 
+Requires **Python 3.11+** (see `pyproject.toml`).
+
 ```bash
 # On macOS the binary is `python3` (or `python3.11`); on Linux distros that
 # also expose `python` either form works.
@@ -182,14 +184,12 @@ A compound index on `(status, updated_at)` is created at startup to keep status-
 ## How the background workflow works
 
 1. `GET /v1/metadata` calls `MetadataService.get_or_schedule`.
-2. If a record exists, the request returns immediately (`200`).
-3. If not, a `pending` placeholder is inserted atomically and a
-  `FetchJob` is pushed onto an `asyncio.Queue`. The API responds with
-   `202 Accepted` — no waiting.
+2. If a **completed** record exists (and `max_age` does not treat it as stale), the handler returns `200` with the full payload. A **`failed`** record also returns `200` so clients can read `error` without polling `202` forever. A **`pending`** record returns `202` with a slim acknowledgement (no body/headers yet).
+3. On a miss (no document) or a stale completed record (when `max_age` is set), a `pending` placeholder is inserted or updated atomically and a `FetchJob` is pushed onto an `asyncio.Queue`. The API responds with `202 Accepted` for the in-flight / scheduled case — no waiting on the fetch.
 4. A pool of consumer tasks (`WORKER_CONCURRENCY`) drains the queue,
-  invokes the fetcher, and stores the final result (or a `failed`
+   invokes the fetcher, and stores the final result (or a `failed`
    record with the error) via the repository.
-5. Subsequent `GET`s for the same URL hit the cache.
+5. Subsequent `GET`s for the same URL hit the cache once the worker has written a `completed` (or `failed`) record.
 
 The worker pool dedupes in-flight URLs, so a burst of concurrent requests for an uncached URL only triggers a single outbound fetch.
 
@@ -205,7 +205,7 @@ By default, a `completed` record is served forever. Callers can opt in to revali
 curl -i "http://localhost:8000/v1/metadata?url=https://example.org&max_age=300"
 ```
 
-When `max_age` triggers a refresh, the existing document is flipped back to `pending` (its body remains visible until the new fetch completes) and a fresh `FetchJob` is enqueued. The response is `202`.
+When `max_age` triggers a refresh, the existing document is flipped back to `pending` in MongoDB. Previous `headers` / `page_source` / etc. are **left in the document** until the worker overwrites them on success (so the stored record is not blank mid-refresh). The HTTP response is still **`202`** with the slim acknowledgement model — clients do **not** receive the old cached body in that response; they should retry `GET` after the worker finishes.
 
 ## SSRF guard
 
@@ -246,8 +246,7 @@ ruff check --fix .   # auto-fix lint violations
 - The `BackgroundWorker` can be swapped for a Celery/RQ/Arq backend by re-implementing the `JobHandler` contract - the rest of the codebase is unchanged.
 - The repository is the only Mongo-aware module; switching to another document store would only require replacing it.
 - The `MetadataService` is fully isolated from FastAPI, making it easy to invoke from CLI commands, batch jobs, or other transports.
-- `app.services.rate_limiter.RateLimiter` is a `Protocol`; a token-bucket or Redis-backed limiter can be dropped in without  
-touching the fetcher.
+- `app.services.rate_limiter.RateLimiter` is a `Protocol`; a token-bucket or Redis-backed limiter can be dropped in without touching the fetcher.
 
 ## Trade-offs & Limitations
 
